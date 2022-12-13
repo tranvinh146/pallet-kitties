@@ -2,30 +2,52 @@
 
 pub use pallet::*;
 
+#[cfg(test)]
+mod mock;
+
+#[cfg(test)]
+mod tests;
+
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 
 #[frame_support::pallet]
 pub mod pallet {
 	use frame_support::{
+		dispatch::fmt,
 		inherent::Vec,
 		pallet_prelude::{DispatchResult, ValueQuery, *},
-		traits::Randomness,
+		traits::{Randomness, Time},
 	};
 	use frame_system::pallet_prelude::{OriginFor, *};
+
+	type Dna = Vec<u8>;
 
 	#[pallet::pallet]
 	#[pallet::without_storage_info]
 	#[pallet::generate_store(pub(super) trait Store)]
 	pub struct Pallet<T>(_);
 
-	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
+	#[derive(Clone, Encode, Decode, PartialEq, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
 	pub struct Kitty<T: Config> {
 		dna: Vec<u8>,
 		owner: T::AccountId,
 		price: u32,
 		gender: Gender,
+		created_date: <<T as Config>::Time as Time>::Moment,
+	}
+
+	impl<T: Config> fmt::Debug for Kitty<T> {
+		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+			f.debug_struct("Kitty")
+				.field("dna", &self.dna)
+				.field("owner", &self.owner)
+				.field("price", &self.price)
+				.field("gender", &self.gender)
+				.field("created_date", &self.created_date)
+				.finish()
+		}
 	}
 
 	#[derive(Encode, Decode, Debug, Clone, PartialEq, TypeInfo)]
@@ -38,6 +60,10 @@ pub mod pallet {
 	pub trait Config: frame_system::Config {
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		type KittyRandomness: Randomness<Self::Hash, Self::BlockNumber>;
+		type Time: Time;
+
+		#[pallet::constant]
+		type MaxKitty: Get<u32>;
 	}
 
 	#[pallet::storage]
@@ -53,9 +79,9 @@ pub mod pallet {
 	pub type KittyInfo<T: Config> = StorageMap<_, Blake2_128Concat, T::Hash, Kitty<T>, OptionQuery>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn owned_kitties)]
-	pub type OwnedKitties<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, Vec<Vec<u8>>, OptionQuery>;
+	#[pallet::getter(fn kitty_owner)]
+	pub type KittyOwner<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, BoundedVec<Dna, T::MaxKitty>, OptionQuery>;
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -69,6 +95,7 @@ pub mod pallet {
 	pub enum Error<T> {
 		NotFound,
 		NotOwner,
+		MaxKitty,
 	}
 
 	#[pallet::call]
@@ -83,14 +110,17 @@ pub mod pallet {
 				owner: owner.clone(),
 				price: 0u8.into(),
 				gender: Kitty::<T>::gender(dna.clone()),
+				created_date: T::Time::now(),
 			};
+
+			log::info!("{:?}", new_kitty);
 
 			TotalKitties::<T>::set(Self::total_kitties() + 1);
 			KittyInfo::<T>::insert(dna_hash, new_kitty);
 
-			let mut kitties = Self::owned_kitties(owner.clone()).unwrap_or(Vec::new());
-			kitties.push(dna.clone());
-			OwnedKitties::<T>::insert(owner.clone(), kitties);
+			let mut kitties = Self::kitty_owner(owner.clone()).unwrap_or_default();
+			kitties.try_push(dna.clone()).unwrap();
+			KittyOwner::<T>::insert(owner.clone(), kitties);
 
 			Self::deposit_event(Event::CreatedNew(owner, dna));
 
@@ -115,14 +145,14 @@ pub mod pallet {
 
 			let dna = dna.as_ref().to_vec();
 
-			let mut sender_kitties = Self::owned_kitties(sender.clone()).unwrap();
+			let mut sender_kitties = Self::kitty_owner(sender.clone()).unwrap_or_default();
 			let index = sender_kitties.iter().position(|x| *x == dna.clone()).unwrap();
 			sender_kitties.remove(index);
-			OwnedKitties::<T>::insert(sender.clone(), sender_kitties);
+			KittyOwner::<T>::insert(sender.clone(), sender_kitties);
 
-			let mut receiver_kitties = Self::owned_kitties(receiver.clone()).unwrap_or(Vec::new());
-			receiver_kitties.push(dna.clone());
-			OwnedKitties::<T>::insert(receiver.clone(), receiver_kitties);
+			let mut receiver_kitties = Self::kitty_owner(receiver.clone()).unwrap_or_default();
+			receiver_kitties.try_push(dna.clone()).err();
+			KittyOwner::<T>::insert(receiver.clone(), receiver_kitties);
 
 			Self::deposit_event(Event::Transferred(sender, receiver, dna));
 

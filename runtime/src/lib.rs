@@ -274,6 +274,8 @@ impl pallet_sudo::Config for Runtime {
 impl pallet_kitties::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type KittyRandomness = RandomnessCollectiveFlip;
+	type Time = Timestamp;
+	type MaxKitty = ConstU32<5>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
