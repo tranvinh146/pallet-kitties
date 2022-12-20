@@ -13,11 +13,14 @@ mod benchmarking;
 
 #[frame_support::pallet]
 pub mod pallet {
+
 	use frame_support::{
 		dispatch::fmt,
 		inherent::Vec,
 		pallet_prelude::{DispatchResult, ValueQuery, *},
+		sp_runtime::traits::Hash,
 		traits::{Randomness, Time},
+		BoundedVec,
 	};
 	use frame_system::pallet_prelude::{OriginFor, *};
 
@@ -36,6 +39,28 @@ pub mod pallet {
 		price: u32,
 		gender: Gender,
 		created_date: <<T as Config>::Time as Time>::Moment,
+	}
+
+	#[pallet::genesis_config]
+	pub struct GenesisConfig<T: Config> {
+		pub owner: Option<T::AccountId>,
+	}
+
+	#[cfg(feature = "std")]
+	impl<T: Config> Default for GenesisConfig<T> {
+		fn default() -> Self {
+			Self { owner: None }
+		}
+	}
+
+	#[pallet::genesis_build]
+	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
+		fn build(&self) {
+			if self.owner.is_some() {
+				generate_kitty::<T>(self.owner.clone().unwrap(), vec![0, 1]);
+				generate_kitty::<T>(self.owner.clone().unwrap(), vec![0, 0, 2]);
+			}
+		}
 	}
 
 	impl<T: Config> fmt::Debug for Kitty<T> {
@@ -179,9 +204,30 @@ pub mod pallet {
 
 		fn random_hash() -> T::Hash {
 			let nonce = Self::get_and_increment_nonce();
+			log::info!("{:?}", nonce);
 			let (random_value, _) = T::KittyRandomness::random(&nonce);
 
 			random_value
 		}
+	}
+
+	pub fn generate_kitty<T: Config>(owner: T::AccountId, dna: Vec<u8>) {
+		let dna_hash = T::Hashing::hash_of(&dna);
+		let new_kitty = Kitty {
+			dna: dna.clone(),
+			owner: owner.clone(),
+			price: 0u8.into(),
+			gender: Kitty::<T>::gender(dna.clone()),
+			created_date: T::Time::now(),
+		};
+
+		log::info!("{:?}", new_kitty);
+
+		TotalKitties::<T>::set(Pallet::<T>::total_kitties() + 1);
+		KittyInfo::<T>::insert(dna_hash, new_kitty);
+
+		let mut kitties = Pallet::<T>::kitty_owner(owner.clone()).unwrap_or_default();
+		kitties.try_push(dna.clone()).unwrap();
+		KittyOwner::<T>::insert(owner.clone(), kitties);
 	}
 }

@@ -295,7 +295,7 @@ construct_runtime!(
 		TransactionPayment: pallet_transaction_payment,
 		Sudo: pallet_sudo,
 		// Include the custom logic from the pallet-kitties in the runtime.
-		SubbstrateKitties: pallet_kitties,
+		SubstrateKitties: pallet_kitties,
 	}
 );
 
